@@ -12,6 +12,7 @@ import numpy as np
 import math
 import matplotlib.pyplot as plt
 import threading
+import sys
 #from pynput.mouse import Button, Controller, Listener
 
 #used to calculate indicies for arrays and matricies
@@ -58,6 +59,49 @@ def intInput(prompt,minimum, maximum):
             else:
                 print("Invalid input. Please provide an integer between " + str(minimum) + " and " + str(maximum) + ":")
 
+#source term
+def source(x,y,t, temperature):
+    f = 0
+
+    #check the location and time of the click
+    if(abs(x-x_click)<= 0.025*width and abs(y-y_click) <= 0.025*length and t == t_click):
+        f = temperature
+    for i in range(len(perm_heat_x)):
+        if(abs(x-perm_heat_x[i])<= 0.025*width and abs(y-perm_heat_y[i]) <= 0.025*length):
+            f += perm_heat_value[i]
+    return(f)
+
+def sourceInput():
+    global T_source
+    while(True):
+        T_source = floatInput("Please input a temperature between 0 and 200 Kelvin to add when pressing on the plot", 0, 200)
+
+#Boundary Cofficients
+def Tboundary(t, m):
+    T_boundary = T_initial + m*t
+    if(min_temp > t):
+        T_boundary = min_temp
+    elif(max_temp < t):
+        T_boundary = max_temp
+    return(T_boundary)
+
+def on_press(event):
+    global t_click
+    global x_click
+    global y_click
+    global click_type
+
+    #the click time is set to be two iterations after the current time to insure that it is not incremented before the source function is called
+    if(event.button == 1):
+        t_click = t + 2*dt
+        x_click = event.xdata
+        y_click = event.ydata
+
+    elif(event.button == 3):
+        perm_heat_x.append(event.xdata)
+        perm_heat_y.append(event.ydata)
+        perm_heat_value.append(T_source)
+
 #start time
 t_start = 0
 t = t_start
@@ -77,20 +121,9 @@ click_type = 0
 #time-step in seconds
 dt = floatInput("Please input the desired time step at each iteration in seconds", 0, np.inf)
 
-##########################
-def on_press(event):
-    global t_click
-    global x_click
-    global y_click
-    global click_type
-##########################
-
-    #the click time is set to be two iterations after the current time to insure that it is not incremented before the source function is called
-    t_click = t + 2*dt
-
-    x_click = event.xdata
-    y_click = event.ydata
-    click_type = event.button
+perm_heat_x = []
+perm_heat_y = []
+perm_heat_value = []
 
 
 
@@ -106,34 +139,24 @@ yB = -(length/2)
 #diffusion coefficient
 thermalDiff = floatInput("Please input the desired thermal diffusivity constant in (m^2)/s", 0, 0.2)
 
-max_temp = 500
+max_temp = 200
 min_temp = 0
 
 #initial temp
-T_initial = floatInput("Please input the initial boundary temperature in Kelvin, between 0 and 500 Kelvin", 0, 500)
+T_initial = floatInput("Please input the initial boundary temperature in Kelvin, between 0 and 200 Kelvin", 0, 200)
 
 #rate of change of the boundary temperature
 rate = floatInput("Please input the rate of change of the boundary temperature in Kelvin/s (0 for constant temperature)", -np.inf, np.inf)
 
 if(rate > 0):
-    max_temp = floatInput("Please input the max temperature for the boundary in Kelvin. The value must be greater than the initial temperature of the boundary and less than 500 Kelvin", T_initial, 500)
+    max_temp = floatInput("Please input the max temperature for the boundary in Kelvin. The value must be greater than the initial temperature of the boundary and less than 200 Kelvin", T_initial, 200)
 
 elif(rate < 0):
-    min_temp = floatInput("Please input the minimum temperature for the boundary in Kelvin. The value must be less than the initial temperature of the boundary and greater than 0 Kelvin", T_initial, 500)
+    min_temp = floatInput("Please input the minimum temperature for the boundary in Kelvin. The value must be less than the initial temperature of the boundary and greater than 0 Kelvin", 0, T_initial)
 
-###########################
-#Boundary Cofficients
-def Tboundary(t, m):
-    T_boundary = T_initial + m*t
-    if(min_temp > t):
-        T_boundary = min_temp
-    elif(max_temp < t):
-        T_boundary = max_temp
-    return(T_boundary)
-###########################
 
 #initial temperature of the plate
-T_plate = floatInput("Please input the initial plate temperature in Kelvin, between 0 and 500 Kelvin", 0, 500)
+T_plate = floatInput("Please input the initial plate temperature in Kelvin, between 0 and 200 Kelvin", 0, 200)
 
 #setting up the number of points
 gridX = intInput("Please input the desired number of points along horizontal component of the grid", 0, np.inf)
@@ -151,24 +174,6 @@ dy = (yT-yB)/(gridY-1)
 
 T_source = T_plate
 
-#source term
-def source(x,y,t, temperature):
-    f = 0
-
-    #check the location and time of the click
-    if(abs(x-x_click)<= 0.1 and abs(y-y_click) <= 0.1 and t == t_click):
-        f = temperature
-
-        #if it was a right click, make the value negative
-        if(click_type == 3):
-            f = -f
-    return(f)
-
-def sourceInput():
-    global T_source
-    while(True):
-        T_source = floatInput("Please input a temperature between 0 and 500 Kelvin to add when pressing on the plot", 0, 500)
-
 #set up the vectors for the old and new temperatures
 T_old = np.full((gridX*gridY,1), T_plate)
 T_new = np.full((gridX*gridY,1), T_plate)
@@ -177,6 +182,7 @@ T_new = np.full((gridX*gridY,1), T_plate)
 RHS = np.zeros(gridX*gridY)
 
 thr = threading.Thread(target = sourceInput)
+thr.daemon = True
 thr.start()
 
 #parameter vectors for creating the sparse matrix
@@ -242,14 +248,13 @@ while True:
     T_new = la.spsolve(A, RHS)
 
     T_matrix = np.full((gridX,gridY), 0.)
-    #X,Y = np.meshgrid(x,y)
     for i in range(gridX):
         for j in range(gridY):
             T_matrix[i][j] = T_new[point(i,j)]
     T_mat = np.transpose(T_matrix)
     if(not plt.get_fignums()):
-        break
-    graph = plt.imshow(T_mat, cmap='jet', extent = [xL, xR, yB, yT], vmin =0, vmax = 500)
+        exit()
+    graph = plt.imshow(T_mat, cmap='jet', extent = [xL, xR, yB, yT], vmin =0, vmax = 200)
     if t == t_start :
         bar = fig.colorbar(graph, ax=ax)
     
